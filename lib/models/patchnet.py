@@ -46,8 +46,8 @@ class PatchNet(nn.Module):
         self.mean_size_arr = mean_size_arr
 
         # center estimation module
-        input_channels = 6 if cfg['include_rgb'] else 3
-        self.center_reg_backbone = PlainNet(input_channels=3, layer_cfg=[128, 128, 256], kernal_size=1)
+        input_channels = 6 if cfg['add_rgb'] else 3
+        self.center_reg_backbone = PlainNet(input_channels=input_channels, layer_cfg=[128, 128, 256], kernal_size=1)
         self.center_reg_head = nn.Sequential(nn.Linear(259, 256), nn.BatchNorm1d(256), nn.ReLU(inplace=True), nn.Dropout(0.5),
                                              nn.Linear(256, 128), nn.BatchNorm1d(128), nn.ReLU(inplace=True),
                                              nn.Linear(128, 3))

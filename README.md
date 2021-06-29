@@ -158,5 +158,5 @@ If you have any question about this project, please feel free to contact xinzhu.
 ### Slurm
 
 ```sh
-sbatch run_agp_a100.sh "cd /workspace/patchnet/experiments/patchnet_attention_rgb && sh train.sh"
+sbatch run_slurm.sh "cd /workspace/patchnet/experiments/patchnet_attention_rgb && sh train.sh"
 ```
