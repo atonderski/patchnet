@@ -70,6 +70,7 @@ def main():
     train_loader, test_loader = build_dataloader(cfg['dataset'], dataset_helper, logger)
 
     # build model
+    cfg['model']['add_rgb'] = cfg['dataset']['add_rgb']
     model = build_model(cfg['model'], dataset_helper, logger)
 
     if args.evaluation:

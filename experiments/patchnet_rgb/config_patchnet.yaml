@@ -1,7 +1,7 @@
 random_seed: 444
 dataset:
   type: 'patch'
-  add_rgb: False
+  add_rgb: True
   rotate_to_center: True
   patch_size: [32, 32]
   batch_size: 64

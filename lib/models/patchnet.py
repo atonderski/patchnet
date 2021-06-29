@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
 
 from lib.backbones.plainnet import PlainNet
 from lib.backbones.senet import senet18_patchnet as senet
@@ -13,6 +14,29 @@ from lib.extensions.mask_global_pooling import mask_global_avg_pooling_2d
 from lib.helpers.misc_helper import init_weights
 
 
+class AttentionPool(nn.Module):
+    def __init__(self, dim, num_heads):
+        super().__init__()
+        # self.query = nn.Parameter(512)
+        self.query_pool = nn.AdaptiveMaxPool2d((1,1))
+        self.attention = nn.MultiheadAttention(
+            embed_dim=dim,
+            num_heads=num_heads,
+        )
+        self.norm = torch.nn.LayerNorm((512, 32, 32))
+
+    def forward(self, feature_map):
+        # normalize feature map, l2, layernorm, ...
+        feature_map = self.norm(feature_map)
+        # feature_map = feature_map / torch.norm(feature_map)
+        query = self.query_pool(feature_map)
+        query = rearrange(query, 'b c 1 1 -> 1 b c')
+        key_val = rearrange(feature_map, 'b c h w -> (h w) b c')
+        out, attention_maps = self.attention(query, key_val, key_val)
+        out = rearrange(out, '1 b c -> b c')
+        return out, attention_maps
+
+
 class PatchNet(nn.Module):
     def __init__(self, cfg, num_heading_bin, num_size_cluster, mean_size_arr):
         super().__init__()
@@ -22,6 +46,7 @@ class PatchNet(nn.Module):
         self.mean_size_arr = mean_size_arr
 
         # center estimation module
+        input_channels = 6 if cfg['include_rgb'] else 3
         self.center_reg_backbone = PlainNet(input_channels=3, layer_cfg=[128, 128, 256], kernal_size=1)
         self.center_reg_head = nn.Sequential(nn.Linear(259, 256), nn.BatchNorm1d(256), nn.ReLU(inplace=True), nn.Dropout(0.5),
                                              nn.Linear(256, 128), nn.BatchNorm1d(128), nn.ReLU(inplace=True),
@@ -46,8 +71,18 @@ class PatchNet(nn.Module):
         self.box_est_head3 = nn.Sequential(nn.Linear(515, 512), nn.BatchNorm1d(512), nn.ReLU(inplace=True), nn.Dropout(0.5),
                                           nn.Linear(512, 256), nn.BatchNorm1d(256), nn.ReLU(inplace=True),
                                           nn.Linear(256, 3 + self.num_heading_bin*2 + self.num_size_cluster*4))
-
-
+        if cfg['confidence_head']:
+            self.confidence_head1 = nn.Sequential(nn.Linear(515, 512), nn.BatchNorm1d(512), nn.ReLU(inplace=True), nn.Dropout(0.5),
+                                            nn.Linear(512, 256), nn.BatchNorm1d(256), nn.ReLU(inplace=True),
+                                            nn.Linear(256, 1))
+            self.confidence_head2 = nn.Sequential(nn.Linear(515, 512), nn.BatchNorm1d(512), nn.ReLU(inplace=True), nn.Dropout(0.5),
+                                            nn.Linear(512, 256), nn.BatchNorm1d(256), nn.ReLU(inplace=True),
+                                            nn.Linear(256, 1))
+            self.confidence_head3 = nn.Sequential(nn.Linear(515, 512), nn.BatchNorm1d(512), nn.ReLU(inplace=True), nn.Dropout(0.5),
+                                            nn.Linear(512, 256), nn.BatchNorm1d(256), nn.ReLU(inplace=True),
+                                            nn.Linear(256, 1))
+        if self.cfg['attention_mask']:
+            self.attention_pool = AttentionPool(dim=512, num_heads=4)
         init_weights(self, self.cfg['init'])
 
 
@@ -77,17 +112,37 @@ class PatchNet(nn.Module):
         # get patch in object coordinate
         patch = patch - center_tnet.unsqueeze(-1).unsqueeze(-1)
 
-        # 3d box regressor
+        # backbone
         box_est_features = self.box_est_backbone(patch)
-        box_est_features = mask_global_max_pooling_2d(box_est_features, mask)  # global max pooling
-        box_est_features = torch.cat([box_est_features.view(-1, 512), one_hot_vec], -1)   # add one hot vec
+
+        # Attention pooling
+        if self.cfg['attention_mask']:
+            box_est_features, attention_maps = self.attention_pool(box_est_features)
+        else:
+            box_est_features = mask_global_max_pooling_2d(box_est_features, mask)  # global max pooling
+            box_est_features = rearrange(box_est_features, 'b c 1 1 -> b c')
+
+        box_est_features = torch.cat([box_est_features, one_hot_vec], -1)   # add one hot vec
+
+        # 3d regression heads
         box1 = self.box_est_head1(box_est_features)
         box2 = self.box_est_head2(box_est_features)
         box3 = self.box_est_head3(box_est_features)
         box  = result_selection_by_distance(stage1_center, box1, box2, box3)
+        
+        # confidence estimation heads
+        if self.cfg['confidence_head']:
+            conf1 = self.confidence_head1(box_est_features)
+            conf2 = self.confidence_head2(box_est_features)
+            conf3 = self.confidence_head3(box_est_features)
+            conf  = result_selection_by_distance(stage1_center, conf1, conf2, conf3)
 
         output_dict = parse_outputs(box, self.num_heading_bin, self.num_size_cluster, self.mean_size_arr, output_dict)
         output_dict['center'] = output_dict['center_boxnet'] + stage1_center  # Bx3
+        if self.cfg['confidence_head']:
+            output_dict['confidence'] = conf
+        if self.cfg['attention_mask']:
+            output_dict['attention_maps'] = attention_maps
         return output_dict
 
 
@@ -106,7 +161,7 @@ if __name__ == '__main__':
     dataset_config = Kitti_Config()
     cfg = {'name': 'patchnet', 'init': 'xavier', 'threshold_offset': 0.5,
            'patch_size': [32, 32], 'num_heading_bin': 12, 'num_size_cluster': 8,
-           'backbone': 'plainnet'}
+           'backbone': 'plainnet', 'attention_mask': True}
 
     input = torch.rand(2, 3, 64, 64)
     one_hot = torch.Tensor(2, 3)

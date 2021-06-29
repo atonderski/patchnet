@@ -76,8 +76,29 @@ def get_loss(center_label,
     # true 3d corners
     corners_3d_gt = boxes3d_to_corners3d_torch(box3d)
     corners_3d_gt_flip = boxes3d_to_corners3d_torch(box3d, flip=True)
-    corners_loss = torch.min(F.l1_loss(corners_3d_pred, corners_3d_gt),
-                             F.l1_loss(corners_3d_pred, corners_3d_gt_flip))
+    corners_loss = torch.min(
+        F.l1_loss(corners_3d_pred, corners_3d_gt), 
+        F.l1_loss(corners_3d_pred, corners_3d_gt_flip)
+    )
+
+    # confidence head loss
+    if 'confidence' in output_dict:
+        """
+            corners_extract_gt = tf.transpose(corners['prediction'], [0, 2, 1])
+            corners_gt = tf.transpose(corners['gt'], [0, 2, 1])
+            corners_gt_flipped = tf.transpose(corners['gt_flipped'], [0, 2, 1])
+            '''PAPER CORNER LOSS'''
+            error = tf.reduce_sum(tf.keras.losses.MAE(corners_extract_gt, corners_gt), axis=-1)
+            error_flipped = tf.reduce_sum(tf.keras.losses.MAE(corners_extract_gt, corners_gt_flipped), axis=-1)
+            loss = tf.minimum(error, error_flipped)
+        """
+        # BROKEN
+        confidence_target = torch.exp(-corners_loss.detach() / 8)
+        print("target: ", confidence_target.size(), "output: ", output_dict['confidence'].size())
+        confidence_loss = torch.nn.functional.binary_cross_entropy_with_logits(target=confidence_target,
+                                                                               input=output_dict['confidence'][:, 0])
+    else:
+        confidence_loss = 0
 
     # # Weighted sum of all losses
     total_loss =  box_loss_weight * (center_loss + \
@@ -85,7 +106,9 @@ def get_loss(center_label,
         heading_residual_normalized_loss*20 + \
         size_residual_normalized_loss*20 + \
         stage1_center_loss + \
-        corner_loss_weight*corners_loss)
+        corner_loss_weight*corners_loss +
+        confidence_loss
+        )
 
     return total_loss
 

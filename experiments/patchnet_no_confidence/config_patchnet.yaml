@@ -29,8 +29,6 @@ model:
   init: 'xavier'
   threshold_offset: 0.5
   backbone: 'senet'
-  attention_mask: False
-  confidence_head: False
 
 scheduler:
   lr_scheduler:

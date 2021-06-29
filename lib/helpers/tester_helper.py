@@ -63,6 +63,8 @@ class Tester(object):
             outputs['heading_residuals'] = outputs['heading_residuals'].cpu().numpy()
             outputs['size_scores'] = outputs['size_scores'].cpu().numpy()
             outputs['size_residuals'] = outputs['size_residuals'].cpu().numpy()
+            if 'confidence' in outputs:
+                outputs['confidence'] = torch.sigmoid(outputs['confidence']).cpu().numpy()
 
             rot_angle = rot_angle.numpy()
             rgb_prob = rgb_prob.numpy()
@@ -80,7 +82,11 @@ class Tester(object):
                 size_res = outputs['size_residuals'][i][size_cls]
                 size_res_list.append(size_res)
                 rot_angle_list.append(rot_angle[i])
-                score_list.append(rgb_prob[i])  # 2D RGB detection score
+                if 'confidence' in outputs:
+                    score = rgb_prob[i] * outputs['confidence'][i]
+                else:
+                    score = rgb_prob[i]
+                score_list.append(score)
                 id_list.append(id[i])
                 type_list.append(type[i])
                 box2d_list.append(box2d[i])

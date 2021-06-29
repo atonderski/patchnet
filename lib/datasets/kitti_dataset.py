@@ -65,7 +65,7 @@ class KittiDataset(data.Dataset):
 
     def get_label(self, idx):
         label_file = os.path.join(self.label_dir, '%06d.txt' % idx)
-        assert os.path.exists(label_file)
+        assert os.path.exists(label_file), label_file
         return kitti_utils.get_objects_from_label(label_file)
 
     def get_road_plane(self, idx):

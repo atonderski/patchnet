@@ -1,7 +1,7 @@
 random_seed: 444
 dataset:
   type: 'patch'
-  add_rgb: False
+  add_rgb: True
   rotate_to_center: True
   patch_size: [32, 32]
   batch_size: 64
@@ -29,7 +29,7 @@ model:
   init: 'xavier'
   threshold_offset: 0.5
   backbone: 'senet'
-  attention_mask: False
+  attention_mask: True
   confidence_head: False
 
 scheduler:
